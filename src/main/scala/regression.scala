@@ -36,7 +36,7 @@ object RossmannRegression extends Serializable {
     val paramGrid = new ParamGridBuilder()
       .addGrid(lr.regParam, Array(0.1, 0.01))
       .addGrid(lr.fitIntercept)
-      .addGrid(lr.elasticNetParam, Array(0.0, 0.5, 1.0))
+      .addGrid(lr.elasticNetParam, Array(0.0, 0.25, 0.5, 0.75, 1.0))
       .build()
 
     val pipeline = new Pipeline()
@@ -52,17 +52,16 @@ object RossmannRegression extends Serializable {
 
   def preppedRFPipeline():TrainValidationSplit = {
     val dfr = new RandomForestRegressor()
-    
+
     val paramGrid = new ParamGridBuilder()
-      .addGrid(dfr.featureSubsetStrategy, Array("auto", "onethird", "sqrt", "log2"))
-      .addGrid(dfr.maxBins, Array(5, 15, 25, 35))
-      .addGrid(dfr.maxDepth, Array(5, 25, 50, 100))
-      .addGrid(dfr.numTrees, Array(5, 25, 50, 100, 250, 500, 1000))
+      .addGrid(dfr.maxBins, Array(5, 15, 25, 35, 45))
+      .addGrid(dfr.maxDepth, Array(2, 5, 8, 12))
+      .addGrid(dfr.numTrees, Array(5, 15, 25, 35))
       .build()
-    
+
     val pipeline = new Pipeline()
       .setStages(Array(stateHolidayIndexer, schoolHolidayIndexer, assembler, dfr))
-    
+
     val tvs = new TrainValidationSplit()
       .setEstimator(pipeline)
       .setEvaluator(new RegressionEvaluator)
@@ -95,11 +94,12 @@ object RossmannRegression extends Serializable {
     logger.info("Generating test predictions")
     model.transform(toPredict)
       .withColumnRenamed("prediction","Sales")
-      .select("Id", "Sales")
+      .withColumnRenamed("Id","PredId")
+      .select("PredId", "Sales")
   }
 
   def main(args:Array[String]) = {
-    val name = "Example Application"
+    val name = "Linear Regression Application"
     logger.info(s"Starting up $name")
     
     val conf = new SparkConf().setAppName(name)
@@ -147,16 +147,40 @@ object RossmannRegression extends Serializable {
     training.show()
     val lrOut = fitTestEval(linearTvs, training, test, testData)
     lrOut.show()
-      lrOut
-        .write.format("com.databricks.spark.csv")
-        .option("header", "true")
-        .save("linear_regression_predictions.csv")
+    logger.info(lrOut.count)
+
+    val tdOut = testRaw
+      .select("Id")
+      .distinct()
+      .join(lrOut, testRaw("Id") === lrOut("PredId"), "outer")
+      .select("Id", "Sales")
+      .na.fill(0:Double) // some of our inputs were null so we have to
+                         // fill these with something
+    tdOut
+      .coalesce(1)
+      .write.format("com.databricks.spark.csv")
+      .option("header", "true")
+      .save("linear_regression_predictions.csv")
+
+    // now we move onto the pipeline
+    val randomForestTvs = preppedRFPipeline()
     logger.info("evaluating random forest regression")
-    val treeTvs = preppedRFPipeline()
-    val dfrOut = fitTestEval(treeTvs, training, test, testData)
-      dfrOut
-        .write.format("com.databricks.spark.csv")
-        .option("header", "true")
-        .save("random_forest_predictions.csv")
+    training.show()
+    val rfOut = fitTestEval(randomForestTvs, training, test, testData)
+    rfOut.show()
+    logger.info(rfOut.count)
+
+    val rftdOut = testRaw
+      .select("Id")
+      .distinct()
+      .join(rfOut, testRaw("Id") === rfOut("PredId"), "outer")
+      .select("Id", "Sales")
+      .na.fill(0:Double) // some of our inputs were null so we have to
+                         // fill these with something
+    rftdOut
+      .coalesce(1)
+      .write.format("com.databricks.spark.csv")
+      .option("header", "true")
+      .save("random_forest_regression_predictions.csv")
   }
 }
