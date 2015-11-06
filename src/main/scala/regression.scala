@@ -6,7 +6,7 @@ import org.apache.spark.{SparkConf, SparkContext}
 import org.apache.spark.sql.hive.HiveContext
 import org.apache.spark.sql.DataFrame
 // ML Feature Creation, Tuning, Models, and Model Evaluation
-import org.apache.spark.ml.feature.{StringIndexer, VectorAssembler}
+import org.apache.spark.ml.feature.{StringIndexer, VectorAssembler, OneHotEncoder}
 import org.apache.spark.ml.tuning.{ParamGridBuilder, TrainValidationSplit}
 import org.apache.spark.ml.evaluation.{RegressionEvaluator}
 import org.apache.spark.ml.regression.{RandomForestRegressor, LinearRegression}
@@ -16,18 +16,31 @@ import org.apache.spark.mllib.evaluation.RegressionMetrics
 object RossmannRegression extends Serializable {
   @transient lazy val logger = Logger.getLogger(getClass.getName)
 
-  // think there's some dirtiness in the data, this works to clean it
   val stateHolidayIndexer = new StringIndexer()
     .setInputCol("StateHoliday")
     .setOutputCol("StateHolidayIndex")
-
-  // think there's some dirtiness in the data, this works to clean it
   val schoolHolidayIndexer = new StringIndexer()
     .setInputCol("SchoolHoliday")
     .setOutputCol("SchoolHolidayIndex")
+  val stateHolidayEncoder = new OneHotEncoder()
+    .setInputCol("StateHolidayIndex")
+    .setOutputCol("StateHolidayVec")
+  val schoolHolidayEncoder = new OneHotEncoder()
+    .setInputCol("SchoolHolidayIndex")
+    .setOutputCol("SchoolHolidayVec")
+  val dayOfMonthEncoder = new OneHotEncoder()
+    .setInputCol("DayOfMonth")
+  .setOutputCol("DayOfMonthVec")
+  val dayOfWeekEncoder = new OneHotEncoder()
+    .setInputCol("DayOfWeek")
+  .setOutputCol("DayOfWeekVec")
+  val storeEncoder = new OneHotEncoder()
+    .setInputCol("Store")
+    .setOutputCol("StoreVec")
 
   val assembler = new VectorAssembler()
-    .setInputCols(Array("Store", "DayOfWeek", "Open", "DayOfMonth", "StateHolidayIndex", "SchoolHolidayIndex"))
+    .setInputCols(Array("StoreVec", "DayOfWeekVec", "Open",
+      "DayOfMonthVec", "StateHolidayVec", "SchoolHolidayVec"))
     .setOutputCol("features")
 
   def preppedLRPipeline():TrainValidationSplit = {
@@ -40,13 +53,16 @@ object RossmannRegression extends Serializable {
       .build()
 
     val pipeline = new Pipeline()
-      .setStages(Array(stateHolidayIndexer, schoolHolidayIndexer, assembler, lr))
+      .setStages(Array(stateHolidayIndexer, schoolHolidayIndexer,
+        stateHolidayEncoder, schoolHolidayEncoder, storeEncoder,
+        dayOfWeekEncoder, dayOfMonthEncoder,
+        assembler, lr))
     
     val tvs = new TrainValidationSplit()
       .setEstimator(pipeline)
       .setEvaluator(new RegressionEvaluator)
       .setEstimatorParamMaps(paramGrid)
-      .setTrainRatio(0.8)
+      .setTrainRatio(0.75)
     tvs
   }
 
@@ -54,24 +70,26 @@ object RossmannRegression extends Serializable {
     val dfr = new RandomForestRegressor()
 
     val paramGrid = new ParamGridBuilder()
-      .addGrid(dfr.maxBins, Array(5, 15, 25, 35, 45))
-      .addGrid(dfr.maxDepth, Array(2, 5, 8, 12))
-      .addGrid(dfr.numTrees, Array(5, 15, 25, 35))
+      .addGrid(dfr.maxDepth, Array(4, 8, 12))
+      .addGrid(dfr.numTrees, Array(25, 50, 100))
       .build()
 
     val pipeline = new Pipeline()
-      .setStages(Array(stateHolidayIndexer, schoolHolidayIndexer, assembler, dfr))
+      .setStages(Array(stateHolidayIndexer, schoolHolidayIndexer,
+        stateHolidayEncoder, schoolHolidayEncoder, storeEncoder,
+        dayOfWeekEncoder, dayOfMonthEncoder,
+        assembler, dfr))
 
     val tvs = new TrainValidationSplit()
       .setEstimator(pipeline)
       .setEvaluator(new RegressionEvaluator)
       .setEstimatorParamMaps(paramGrid)
-      .setTrainRatio(0.8)
+      .setTrainRatio(0.75)
     tvs
   }
 
-  def fitTestEval(tvs:TrainValidationSplit, training:DataFrame, test:DataFrame,
-    toPredict:DataFrame):DataFrame = {
+  def fitModel(tvs:TrainValidationSplit, data:DataFrame) = {
+    val Array(training, test) = data.randomSplit(Array(0.8, 0.2), seed = 12345)
     logger.info("Fitting data")
     val model = tvs.fit(training)
     logger.info("Now performing test on hold out set")
@@ -91,11 +109,57 @@ object RossmannRegression extends Serializable {
     logger.info("Test RMSE:")
     logger.info(rm.rootMeanSquaredError)
 
-    logger.info("Generating test predictions")
-    model.transform(toPredict)
-      .withColumnRenamed("prediction","Sales")
-      .withColumnRenamed("Id","PredId")
-      .select("PredId", "Sales")
+    model
+  }
+
+  def savePredictions(predictions:DataFrame, testRaw:DataFrame) = {
+    val tdOut = testRaw
+      .select("Id")
+      .distinct()
+      .join(predictions, testRaw("Id") === predictions("PredId"), "outer")
+      .select("Id", "Sales")
+      .na.fill(0:Double) // some of our inputs were null so we have to
+                         // fill these with something
+    tdOut
+      .coalesce(1)
+      .write.format("com.databricks.spark.csv")
+      .option("header", "true")
+      .save("linear_regression_predictions.csv")
+  }
+
+  def loadTrainingData(sqlContext:HiveContext):DataFrame = {
+    val trainRaw = sqlContext
+      .read.format("com.databricks.spark.csv")
+      .option("header", "true")
+      .load("../mlproject/rossman/train.csv")
+      .repartition(6)
+    trainRaw.registerTempTable("raw_training_data")
+
+    sqlContext.sql("""SELECT
+      double(Sales) label, double(Store) Store, int(Open) Open, double(DayOfWeek) DayOfWeek, 
+      StateHoliday, SchoolHoliday, (double(regexp_extract(Date, '\\d+-\\d+-(\\d+)', 1))) DayOfMonth
+      FROM raw_training_data
+    """).na.drop()
+  }
+
+  def loadKaggleTestData(sqlContext:HiveContext) = {
+    val testRaw = sqlContext
+      .read.format("com.databricks.spark.csv")
+      .option("header", "true")
+      .load("../mlproject/rossman/test.csv")
+      .repartition(6)
+    testRaw.registerTempTable("raw_test_data")
+
+    val testData = sqlContext.sql("""SELECT
+      Id, double(Store) Store, int(Open) Open, double(DayOfWeek) DayOfWeek, StateHoliday, 
+      SchoolHoliday, (double(regexp_extract(Date, '\\d+-\\d+-(\\d+)', 1))) DayOfMonth
+      FROM raw_test_data
+      WHERE !(ISNULL(Id) OR ISNULL(Store) OR ISNULL(Open) OR ISNULL(DayOfWeek) 
+        OR ISNULL(StateHoliday) OR ISNULL(SchoolHoliday))
+    """).na.drop() // weird things happen if you don't filter out the null values manually
+
+    Array(testRaw, testData) // got to hold onto testRaw so we can make sure
+    // to have all the prediction IDs to submit to kaggle
   }
 
   def main(args:Array[String]) = {
@@ -108,79 +172,28 @@ object RossmannRegression extends Serializable {
     sc.setLogLevel("WARN")
 
     logger.info("Set Up Complete")
-    val trainRaw = sqlContext
-      .read.format("com.databricks.spark.csv")
-      .option("header", "true")
-      .load("../mlproject/rossman/train.csv")
-    trainRaw.registerTempTable("raw_training_data")
+    val data = loadTrainingData(sqlContext)
+    val Array(testRaw, testData) = loadKaggleTestData(sqlContext)
 
-    val data = sqlContext.sql("""SELECT
-      double(Sales) label, int(Store) Store, int(Open) Open, int(DayOfWeek) DayOfWeek, 
-      StateHoliday, SchoolHoliday, (int(regexp_extract(Date, '\\d+-\\d+-(\\d+)', 1))) DayOfMonth
-      FROM raw_training_data
-    """).na.drop()
+    // // The linear Regression Pipeline
+    // val linearTvs = preppedLRPipeline()
+    // logger.info("evaluating linear regression")
+    // val lrModel = fitModel(linearTvs, data)
+    // logger.info("Generating kaggle predictions")
+    // val lrOut = lrModel.transform(testData)
+    //   .withColumnRenamed("prediction","Sales")
+    //   .withColumnRenamed("Id","PredId")
+    //   .select("PredId", "Sales")
+    // savePredictions(lrOut, testRaw)
 
-    var rowCount = data.count
-    logger.info(s"Row Count for complete training set: $rowCount")
-    val Array(training, test) = data.randomSplit(Array(0.8, 0.2), seed = 12345)
-
-    val testRaw = sqlContext
-      .read.format("com.databricks.spark.csv")
-      .option("header", "true")
-      .load("../mlproject/rossman/test.csv")
-    testRaw.registerTempTable("raw_test_data")
-
-    val testData = sqlContext.sql("""SELECT
-      Id, int(Store) Store, int(Open) Open, int(DayOfWeek) DayOfWeek, StateHoliday, 
-      SchoolHoliday, (int(regexp_extract(Date, '\\d+-\\d+-(\\d+)', 1))) DayOfMonth
-      FROM raw_test_data
-      WHERE !(ISNULL(Id) OR ISNULL(Store) OR ISNULL(Open) OR ISNULL(DayOfWeek) 
-        OR ISNULL(StateHoliday) OR ISNULL(SchoolHoliday))
-    """).na.drop() // weird things happen if you don't filter out the null values manually
-
-    rowCount = testData.count
-    logger.info(s"Row Count for Test: $rowCount")
-
-    // now we move onto the pipeline
-    val linearTvs = preppedLRPipeline()
-    logger.info("evaluating linear regression")
-    training.show()
-    val lrOut = fitTestEval(linearTvs, training, test, testData)
-    lrOut.show()
-    logger.info(lrOut.count)
-
-    val tdOut = testRaw
-      .select("Id")
-      .distinct()
-      .join(lrOut, testRaw("Id") === lrOut("PredId"), "outer")
-      .select("Id", "Sales")
-      .na.fill(0:Double) // some of our inputs were null so we have to
-                         // fill these with something
-    tdOut
-      .coalesce(1)
-      .write.format("com.databricks.spark.csv")
-      .option("header", "true")
-      .save("linear_regression_predictions.csv")
-
-    // now we move onto the pipeline
+    // The Random Forest Pipeline
     val randomForestTvs = preppedRFPipeline()
     logger.info("evaluating random forest regression")
-    training.show()
-    val rfOut = fitTestEval(randomForestTvs, training, test, testData)
-    rfOut.show()
-    logger.info(rfOut.count)
-
-    val rftdOut = testRaw
-      .select("Id")
-      .distinct()
-      .join(rfOut, testRaw("Id") === rfOut("PredId"), "outer")
-      .select("Id", "Sales")
-      .na.fill(0:Double) // some of our inputs were null so we have to
-                         // fill these with something
-    rftdOut
-      .coalesce(1)
-      .write.format("com.databricks.spark.csv")
-      .option("header", "true")
-      .save("random_forest_regression_predictions.csv")
+    val rfModel = fitModel(randomForestTvs, data)
+    val rfOut = rfModel.transform(testData)
+      .withColumnRenamed("prediction","Sales")
+      .withColumnRenamed("Id","PredId")
+      .select("PredId", "Sales")
+    savePredictions(rfOut, testRaw)
   }
 }
