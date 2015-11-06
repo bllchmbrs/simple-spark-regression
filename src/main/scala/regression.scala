@@ -169,7 +169,7 @@ object RossmannRegression extends Serializable {
     val conf = new SparkConf().setAppName(name)
     val sc = new SparkContext(conf)
     val sqlContext = new HiveContext(sc)
-    sc.setLogLevel("WARN")
+//    sc.setLogLevel("INFO")
 
     logger.info("Set Up Complete")
     val data = loadTrainingData(sqlContext, args(0))

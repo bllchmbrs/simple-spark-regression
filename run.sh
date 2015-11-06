@@ -15,6 +15,6 @@ rm -rf linear_regression_predictions.csv
 rm -rf random_forest_predictions.csv
 sbt package && $SPARK_HOME/bin/spark-submit \
                    --packages com.databricks:spark-csv_2.11:1.1.0 \
-                   --master local \
+#                   --master local \
                    --class net.sparktutorials.examples.$class \
                    $jarfile $passThroughArgs
