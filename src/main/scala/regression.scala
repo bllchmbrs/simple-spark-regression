@@ -127,11 +127,11 @@ object RossmannRegression extends Serializable {
       .save("linear_regression_predictions.csv")
   }
 
-  def loadTrainingData(sqlContext:HiveContext):DataFrame = {
+  def loadTrainingData(sqlContext:HiveContext, filePath:String):DataFrame = {
     val trainRaw = sqlContext
       .read.format("com.databricks.spark.csv")
       .option("header", "true")
-      .load("../mlproject/rossman/train.csv")
+      .load(filePath)
       .repartition(6)
     trainRaw.registerTempTable("raw_training_data")
 
@@ -142,11 +142,11 @@ object RossmannRegression extends Serializable {
     """).na.drop()
   }
 
-  def loadKaggleTestData(sqlContext:HiveContext) = {
+  def loadKaggleTestData(sqlContext:HiveContext, filePath:String) = {
     val testRaw = sqlContext
       .read.format("com.databricks.spark.csv")
       .option("header", "true")
-      .load("../mlproject/rossman/test.csv")
+      .load(filePath)
       .repartition(6)
     testRaw.registerTempTable("raw_test_data")
 
@@ -172,8 +172,8 @@ object RossmannRegression extends Serializable {
     sc.setLogLevel("WARN")
 
     logger.info("Set Up Complete")
-    val data = loadTrainingData(sqlContext)
-    val Array(testRaw, testData) = loadKaggleTestData(sqlContext)
+    val data = loadTrainingData(sqlContext, args(0))
+    val Array(testRaw, testData) = loadKaggleTestData(sqlContext, args(1))
 
     // The linear Regression Pipeline
     val linearTvs = preppedLRPipeline()
