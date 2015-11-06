@@ -132,7 +132,7 @@ object RossmannRegression extends Serializable {
       .read.format("com.databricks.spark.csv")
       .option("header", "true")
       .load(filePath)
-      .repartition(6)
+      .repartition(30)
     trainRaw.registerTempTable("raw_training_data")
 
     sqlContext.sql("""SELECT
@@ -147,7 +147,7 @@ object RossmannRegression extends Serializable {
       .read.format("com.databricks.spark.csv")
       .option("header", "true")
       .load(filePath)
-      .repartition(6)
+      .repartition(30)
     testRaw.registerTempTable("raw_test_data")
 
     val testData = sqlContext.sql("""SELECT
