@@ -1,6 +1,6 @@
-name := "ScalaSparkTemplate" // change to project name
+name := "Scala-Spark-Regression" 
 
-organization := "com.github.anabranch" // change to your org
+organization := "net.sparktutorials" 
 
 version := "0.1"
 
@@ -24,7 +24,7 @@ libraryDependencies ++= Seq(
   "com.databricks" % "spark-csv_2.10" % "1.2.0"
 )
 
-mainClass in (Compile, packageBin) := Some("com.github.anabranch.ExampleClass")
+mainClass in (Compile, packageBin) := Some("net.sparktutorials.examples.LinearRegression")
 
 resolvers += "bintray-spark-packages" at
   "https://dl.bintray.com/spark-packages/maven/" // allows us to include spark packages
