@@ -112,7 +112,7 @@ object RossmannRegression extends Serializable {
     model
   }
 
-  def savePredictions(predictions:DataFrame, testRaw:DataFrame, filepath:String) = {
+  def savePredictions(predictions:DataFrame, testRaw:DataFrame, filePath:String) = {
     val tdOut = testRaw
       .select("Id")
       .distinct()
