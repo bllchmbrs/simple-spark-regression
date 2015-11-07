@@ -112,7 +112,7 @@ object RossmannRegression extends Serializable {
     model
   }
 
-  def savePredictions(predictions:DataFrame, testRaw:DataFrame) = {
+  def savePredictions(predictions:DataFrame, testRaw:DataFrame, filepath:String) = {
     val tdOut = testRaw
       .select("Id")
       .distinct()
@@ -124,7 +124,7 @@ object RossmannRegression extends Serializable {
       .coalesce(1)
       .write.format("com.databricks.spark.csv")
       .option("header", "true")
-      .save("linear_regression_predictions.csv")
+      .save(filePath)
   }
 
   def loadTrainingData(sqlContext:HiveContext, filePath:String):DataFrame = {
@@ -184,7 +184,7 @@ object RossmannRegression extends Serializable {
       .withColumnRenamed("prediction","Sales")
       .withColumnRenamed("Id","PredId")
       .select("PredId", "Sales")
-    savePredictions(lrOut, testRaw)
+    savePredictions(lrOut, testRaw, "linear_predictions.csv")
 
     // The Random Forest Pipeline
     val randomForestTvs = preppedRFPipeline()
@@ -194,6 +194,6 @@ object RossmannRegression extends Serializable {
       .withColumnRenamed("prediction","Sales")
       .withColumnRenamed("Id","PredId")
       .select("PredId", "Sales")
-    savePredictions(rfOut, testRaw)
+    savePredictions(rfOut, testRaw, "random_forest_predictions.csv")
   }
 }
