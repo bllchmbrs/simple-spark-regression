@@ -70,8 +70,8 @@ object RossmannRegression extends Serializable {
     val dfr = new RandomForestRegressor()
 
     val paramGrid = new ParamGridBuilder()
-      .addGrid(dfr.maxDepth, Array(4, 8, 12))
-      .addGrid(dfr.numTrees, Array(25, 50, 100))
+      .addGrid(dfr.maxDepth, Array(2, 4, 8, 12))
+      .addGrid(dfr.numTrees, Array(20, 50, 100))
       .build()
 
     val pipeline = new Pipeline()
@@ -84,7 +84,7 @@ object RossmannRegression extends Serializable {
       .setEstimator(pipeline)
       .setEvaluator(new RegressionEvaluator)
       .setEstimatorParamMaps(paramGrid)
-      .setTrainRatio(0.75)
+      .setTrainRatio(0.55)
     tvs
   }
 
