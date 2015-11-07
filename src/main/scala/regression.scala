@@ -70,7 +70,8 @@ object RossmannRegression extends Serializable {
     val dfr = new RandomForestRegressor()
 
     val paramGrid = new ParamGridBuilder()
-      .addGrid(dfr.maxDepth, Array(2, 4, 8, 12))
+      .addGrid(dfr.minInstancesPerNode, Array(1, 5, 15))
+      .addGrid(dfr.maxDepth, Array(2, 4, 8))
       .addGrid(dfr.numTrees, Array(20, 50, 100))
       .build()
 
@@ -175,16 +176,16 @@ object RossmannRegression extends Serializable {
     val data = loadTrainingData(sqlContext, args(0))
     val Array(testRaw, testData) = loadKaggleTestData(sqlContext, args(1))
 
-    // The linear Regression Pipeline
-    val linearTvs = preppedLRPipeline()
-    logger.info("evaluating linear regression")
-    val lrModel = fitModel(linearTvs, data)
-    logger.info("Generating kaggle predictions")
-    val lrOut = lrModel.transform(testData)
-      .withColumnRenamed("prediction","Sales")
-      .withColumnRenamed("Id","PredId")
-      .select("PredId", "Sales")
-    savePredictions(lrOut, testRaw, "linear_predictions.csv")
+    // // The linear Regression Pipeline
+    // val linearTvs = preppedLRPipeline()
+    // logger.info("evaluating linear regression")
+    // val lrModel = fitModel(linearTvs, data)
+    // logger.info("Generating kaggle predictions")
+    // val lrOut = lrModel.transform(testData)
+    //   .withColumnRenamed("prediction","Sales")
+    //   .withColumnRenamed("Id","PredId")
+    //   .select("PredId", "Sales")
+    // savePredictions(lrOut, testRaw, "linear_predictions.csv")
 
     // The Random Forest Pipeline
     val randomForestTvs = preppedRFPipeline()
