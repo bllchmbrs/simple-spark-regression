@@ -176,25 +176,25 @@ object RossmannRegression extends Serializable {
     val data = loadTrainingData(sqlContext, args(0))
     val Array(testRaw, testData) = loadKaggleTestData(sqlContext, args(1))
 
-    // // The linear Regression Pipeline
-    // val linearTvs = preppedLRPipeline()
-    // logger.info("evaluating linear regression")
-    // val lrModel = fitModel(linearTvs, data)
-    // logger.info("Generating kaggle predictions")
-    // val lrOut = lrModel.transform(testData)
-    //   .withColumnRenamed("prediction","Sales")
-    //   .withColumnRenamed("Id","PredId")
-    //   .select("PredId", "Sales")
-    // savePredictions(lrOut, testRaw, "linear_predictions.csv")
-
-    // The Random Forest Pipeline
-    val randomForestTvs = preppedRFPipeline()
-    logger.info("evaluating random forest regression")
-    val rfModel = fitModel(randomForestTvs, data)
-    val rfOut = rfModel.transform(testData)
+    // The linear Regression Pipeline
+    val linearTvs = preppedLRPipeline()
+    logger.info("evaluating linear regression")
+    val lrModel = fitModel(linearTvs, data)
+    logger.info("Generating kaggle predictions")
+    val lrOut = lrModel.transform(testData)
       .withColumnRenamed("prediction","Sales")
       .withColumnRenamed("Id","PredId")
       .select("PredId", "Sales")
-    savePredictions(rfOut, testRaw, "random_forest_predictions.csv")
+    savePredictions(lrOut, testRaw, "linear_predictions.csv")
+
+    // // The Random Forest Pipeline
+    // val randomForestTvs = preppedRFPipeline()
+    // logger.info("evaluating random forest regression")
+    // val rfModel = fitModel(randomForestTvs, data)
+    // val rfOut = rfModel.transform(testData)
+    //   .withColumnRenamed("prediction","Sales")
+    //   .withColumnRenamed("Id","PredId")
+    //   .select("PredId", "Sales")
+    // savePredictions(rfOut, testRaw, "random_forest_predictions.csv")
   }
 }
